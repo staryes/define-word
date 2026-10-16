@@ -5,7 +5,7 @@
 ;; Author: Oleh Krehel <ohwoeowho@gmail.com>
 ;; URL: https://github.com/abo-abo/define-word
 ;; Version: 0.1.0
-;; Package-Requires: ((emacs "24.3"))
+;; Package-Requires: ((emacs "28.1"))
 ;; Keywords: dictionary, convenience
 
 ;; This file is not part of GNU Emacs
@@ -40,6 +40,10 @@
 (require 'url-parse)
 (require 'url-http)
 (require 'nxml-mode)
+(require 'seq)
+
+(declare-function dictionary-definition "dictionary")
+(defvar dictionary-server)
 
 (defgroup define-word nil
   "Define word at point using an online dictionary."
@@ -65,7 +69,9 @@ By default, `message' is used."
   '((wordnik "https://www.wordnik.com/words/%s" define-word--parse-wordnik)
     (openthesaurus "https://www.openthesaurus.de/synonyme/%s" define-word--parse-openthesaurus)
     (webster "http://webstersdictionary1828.com/Dictionary/%s" define-word--parse-webster)
-    (offline-wikitionary define-word--get-offline-wikitionary nil))
+    (offline-wikitionary define-word--get-offline-wikitionary nil)
+    (moedict define-word--get-moedict nil)
+    (translate define-word--get-translate nil))
   "Services for define-word, A list of lists of the
   format (symbol url function-for-parsing).
 Instead of an url string, url can be a custom function for retrieving results."
@@ -83,6 +89,8 @@ Instead of an url string, url can be a custom function for retrieving results."
           (const openthesaurus)
           (const webster)
           (const offline-wikitionary)
+          (const moedict)
+          (const translate)
           symbol))
 
 (defvar define-word-offline-dict-directory nil
@@ -99,6 +107,44 @@ Instead of an url string, url can be a custom function for retrieving results."
                (concat "rg --no-filename --color never '" regex "'"))))
     (unless (= 0 (length res))
       res)))
+
+(defun define-word--get-moedict (word)
+  "Fetch WORD from 萌典, the g0v mirror of the MOE dictionary.
+Returns nil when the word is absent, which `define-word' reports as
+\"0 definitions found\"."
+  (with-temp-buffer
+    (ignore-errors
+      (url-insert-file-contents
+       (concat "https://www.moedict.tw/uni/" (url-hexify-string word))))
+    (goto-char (point-min))
+    (when (> (buffer-size) 0)
+      (mapconcat
+       (lambda (heteronym)
+         (concat (alist-get 'bopomofo heteronym) "\n"
+                 (mapconcat (lambda (d) (concat "  " (alist-get 'def d)))
+                            (seq-take (alist-get 'definitions heteronym)
+                                      define-word-limit)
+                            "\n")))
+       (alist-get 'heteronyms (json-parse-buffer :object-type 'alist))
+       "\n"))))
+
+(defun define-word--get-translate (word)
+  "Translate WORD between Chinese and English over the DICT protocol.
+CC-CEDICT going 中->英, FreeDict going 英->中."
+  (require 'dictionary)
+  ;; A nil `dictionary-server' tries localhost first and then prompts, so
+  ;; name the host rather than answering y-or-n-p on every lookup.
+  (let* ((dictionary-server "dict.org")
+         (raw (ignore-errors
+                (dictionary-definition
+                 word
+                 ;; fd-eng-zho answers in 簡體 and only one gloss deep.
+                 (if (string-match-p "\\cc" word) "cc-cedict" "fd-eng-zho")))))
+    (when raw
+      ;; Emacs 29's dictionary.el returns undecoded bytes; the guard turns
+      ;; this into a no-op should a later version decode them itself.
+      (let ((bytes (ignore-errors (string-to-unibyte raw))))
+        (if bytes (decode-coding-string bytes 'utf-8) raw)))))
 
 (defun define-word--to-string (word service)
   "Get definition of WORD from SERVICE."

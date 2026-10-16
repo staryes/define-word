@@ -62,7 +62,7 @@ By default, `message' is used."
       #'message))
 
 (defcustom define-word-services
-  '((wordnik "http://wordnik.com/words/%s" define-word--parse-wordnik)
+  '((wordnik "https://www.wordnik.com/words/%s" define-word--parse-wordnik)
     (openthesaurus "https://www.openthesaurus.de/synonyme/%s" define-word--parse-openthesaurus)
     (webster "http://webstersdictionary1828.com/Dictionary/%s" define-word--parse-webster)
     (offline-wikitionary define-word--get-offline-wikitionary nil))
